@@ -1,5 +1,9 @@
 # ramp-postid-meta-translation
 
+## 1.2.0
+
+- Added the ability to check serialized meta values for post IDs
+
 ## 1.0.2
 
 - Fixed issue which threw PHP errors when a batch comparison failed

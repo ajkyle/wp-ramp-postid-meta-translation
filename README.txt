@@ -6,7 +6,7 @@ Tested up to: 3.6
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
-Adds the ability to select which custom fields represent a post mapping and adds them to the batch.
+Adds the ability to select which custom fields represent a post mapping and adds them to the batch. Now with the ability to convert post IDs stored in serialized meta values. This is useful when using the Advanced Custom Fields plugin with relationships (http://www.advancedcustomfields.com/resources/relationship/).
 
 == Installation ==
 

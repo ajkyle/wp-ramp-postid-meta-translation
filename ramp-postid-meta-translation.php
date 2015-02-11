@@ -2,8 +2,8 @@
 /*
 Plugin Name: RAMP Post ID Meta Translation
 Plugin URI: http://crowdfavorite.com
-Description: Adds the ability to select which post meta fields represent a post mapping and adds them to the batch
-Version: 1.0.2
+Description: Adds the ability to select which post meta fields represent a post mapping and adds them to the batch | Modified by ajkyle (https://github.com/ajkyle) to allow for support of serialized meta values that contain post IDs. Advanced Custom Fields uses this for a lot of their relationship fields.
+Version: 1.2.0
 Author: Crowd Favorite
 Author URI: http://crowdfavorite.com
 */
@@ -290,9 +290,20 @@ class RAMP_Meta_Mappings {
 		if (is_array($post_meta_keys)) {
 			foreach ($post_meta_keys as $meta_key => $meta_value) {
 				if (in_array($meta_key, $this->meta_keys_to_map)) {
-					$guid = cfd_get_post_guid($meta_value);
-					if ($guid) {
-						$post->profile['meta'][$meta_key] = $guid;
+					if (is_array($meta_value)) { // Check if we are dealing with an Array, if so, all of the values need to be converted
+						$guid_array = array();
+						foreach($meta_value as $value) {
+							$guid = cfd_get_post_guid($value);
+							if($guid) {
+								$guid_array[] = $guid;
+							}
+ 						}
+ 						$post->profile['meta'][$meta_key] = $guid_array;
+					} else {					
+						$guid = cfd_get_post_guid($meta_value);
+						if ($guid) {
+							$post->profile['meta'][$meta_key] = $guid;
+						}
 					}
 				}
 			}
@@ -309,7 +320,16 @@ class RAMP_Meta_Mappings {
 		if ($object_type == 'post_types') {
 			if (isset($object['meta']) && is_array($object['meta'])) {
 				foreach ($object['meta'] as $meta_key => $meta_value) {
-					if (in_array($meta_key, $this->meta_keys_to_map) && is_numeric($meta_value)) {
+					if (is_array($meta_value)) { // Check if we are dealing with an Array, if so, all the values need to be converted
+						$guid_array = array();
+						foreach($meta_value as $value) {
+							$guid = cfd_get_post_guid($value);
+							if($guid) {
+								$guid_array[] = $guid;
+							}
+ 						}
+ 						$object['meta'][$meta_key] = $guid_array;
+					} else if (is_numeric($meta_value)) {
 						$guid = cfd_get_post_guid($meta_value);
 						if ($guid) {
 							$object['meta'][$meta_key] = $guid;
@@ -321,6 +341,34 @@ class RAMP_Meta_Mappings {
 		return $object;
 	}
 
+	/**
+	 * Runs on client
+	 * Broken out to allow for processing of an array with multiple posts
+	 *
+	 * @param obj $new_post The new post that needs to be processed
+	 **/
+	function process_post_add($new_post) { 
+		if (
+			$new_post // Post exists check
+			&& !in_array($new_post->ID, $this->existing_ids) // Post isnt already in the batch
+			&& in_array($new_post->guid, $this->comparison_data)// Post is modified
+		) {
+			if (!is_array($this->data['post_types'][$new_post->post_type])) {
+				$this->data['post_types'][$new_post->post_type] = array();
+			}
+			$this->data['post_types'][$new_post->post_type][] = $new_post->ID;
+			$this->existing_ids[] = $new_post->ID;
+			// Use for processes and notices
+			$this->added_posts[$new_post->ID] = array(
+									'post_title' => $new_post->post_title,
+									'post_type' => $new_post->post_type,
+									'guid' => $new_post->guid
+								);
+			$this->batch_posts[] = $new_post->guid;
+			$this->process_post($new_post->ID, false);
+		}
+	}
+	
 	/**
 	 * Runs on client
 	 * Process a post so any of the mapped meta keys also get processed in the batch
@@ -338,27 +386,16 @@ class RAMP_Meta_Mappings {
 				// $meta_values should always be an array
 				if (is_array($meta_values)) {
 					foreach ($meta_values as $meta_value) {
-						if (in_array($meta_key, $this->meta_keys_to_map) && (int)$meta_value > 0) {
-							// Check existance
-							$new_post = get_post($meta_value);
-							if (
-								$new_post // Post exists check
-								&& !in_array($new_post->ID, $this->existing_ids) // Post isnt already in the batch
-								&& in_array($new_post->guid, $this->comparison_data)// Post is modified
-							) {
-								if (!is_array($this->data['post_types'][$new_post->post_type])) {
-									$this->data['post_types'][$new_post->post_type] = array();
+						if (in_array($meta_key, $this->meta_keys_to_map)) {
+							if (is_array($meta_value)) { // Add in the ability for arrays of keys to be processed
+								foreach($meta_value as $value) {
+									$new_post = get_post($meta_value);
+									$this->process_post_add($new_post);
 								}
-								$this->data['post_types'][$new_post->post_type][] = $new_post->ID;
-								$this->existing_ids[] = $new_post->ID;
-								// Use for processes and notices
-								$this->added_posts[$new_post->ID] = array(
-														'post_title' => $new_post->post_title,
-														'post_type' => $new_post->post_type,
-														'guid' => $new_post->guid
-													);
-								$this->batch_posts[] = $new_post->guid;
-								$this->process_post($new_post->ID, false);
+							} else if ((int)$meta_value > 0) {
+								// Check existance
+								$new_post = get_post($meta_value);
+								$this->process_post_add($new_post);
 							}
 						}
 					}
@@ -514,11 +551,22 @@ class RAMP_Meta_Mappings {
 					$post_meta = $post_data['profile']['meta'];
 					if ( is_array( $post_meta ) ) {
 						foreach ( $post_meta as $meta_key => $meta_value ) {
-							if ( in_array( $meta_key, $meta_keys_to_map ) && is_numeric( $meta_value ) ) {
-								// Get guid and set it as that!
-								$guid = cfd_get_post_guid( $meta_value );
-								if ( $guid ) {
-									$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = $guid;
+							if ( in_array( $meta_key, $meta_keys_to_map )) {
+								if( is_array($meta_value) ) { // We have an array with potential posts, convert all of them
+									$guid_array = array();
+									foreach($meta_value as $value) {
+										$guid = cfd_get_post_guid( $value );
+										if ( $guid ) {
+											$guid_array[] = $guid;
+										}
+									}
+									$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = $guid_array;
+								} else if( is_numeric( $meta_value ) ) {
+									// Get guid and set it as that!
+									$guid = cfd_get_post_guid( $meta_value );
+									if ( $guid ) {
+										$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = $guid;
+									}
 								}
 							}
 						}
@@ -601,9 +649,22 @@ class RAMP_Meta_Mappings {
 						foreach ($meta as $meta_key => $meta_values) {
 							foreach ($meta_values as $meta_value) {
 								if (in_array($meta_key, $mapped_keys) && !is_numeric($meta_value)) {
-									$mapped_server_post = cfd_get_post_by_guid($meta_value);
-									if ($mapped_server_post) {
-										update_post_meta($server_post->ID, $meta_key, $mapped_server_post->ID, $meta_value);
+									
+									if (is_serialized($meta_value)) { // We have an array with some post GUIDs, convert them all over to IDs
+										$posts_array = unserialize($meta_value);
+										$server_posts = array();
+										foreach($posts_array as $value) {
+											$mapped_server_post = cfd_get_post_by_guid($value);
+											if ($mapped_server_post) {
+												$server_posts[] = (string) $mapped_server_post->ID;
+											}
+										}
+										update_post_meta($server_post->ID, $meta_key, $server_posts, $posts_array);
+									} else {
+										$mapped_server_post = cfd_get_post_by_guid($meta_value);
+										if ($mapped_server_post) {
+											update_post_meta($server_post->ID, $meta_key, $mapped_server_post->ID, $meta_value);
+										}
 									}
 								}
 							}
