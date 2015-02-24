@@ -169,7 +169,7 @@ class RAMP_Meta_Mappings {
 	static $instance;
 
 	// Singleton
-	public function factory() {
+	public static function factory() {
 		if (!isset(self::$instance)) {
 			self::$instance = new RAMP_Meta_Mappings;
 		}
