@@ -3,7 +3,7 @@
 Plugin Name: RAMP Post ID Meta Translation
 Plugin URI: http://crowdfavorite.com
 Description: Adds the ability to select which post meta fields represent a post mapping and adds them to the batch | Modified by ajkyle (https://github.com/ajkyle) to allow for support of serialized meta values that contain post IDs. Advanced Custom Fields uses this for a lot of their relationship fields.
-Version: 1.2.0
+Version: 1.3.0
 Author: Crowd Favorite
 Author URI: http://crowdfavorite.com
 */
@@ -151,7 +151,7 @@ function ramp_mm_available_keys() {
 
 function ramp_mm_cfd_init() {
 	$ramp_meta = RAMP_Meta_Mappings::factory();
-	$ramp_meta->add_actions();
+	$ramp_meta->add_actions();	
 }
 add_action('cfd_admin_init', 'ramp_mm_cfd_init');
 
@@ -165,9 +165,11 @@ class RAMP_Meta_Mappings {
 	var $comparison_key = '_ramp_mm_comp_data';
 	var $history_key = '_ramp_mm_history_data';
 	var $name = 'RAMP Meta Mappings';
+	var $options = array();
+	var $log_file;
 
 	static $instance;
-
+	
 	// Singleton
 	public static function factory() {
 		if (!isset(self::$instance)) {
@@ -179,6 +181,10 @@ class RAMP_Meta_Mappings {
 	function __construct() {
 		$this->meta_keys_to_map = ramp_mm_keys();
 		$this->extras_id = cfd_make_callback_id('ramp_mm_keys');
+		
+		$this->options = maybe_unserialize(get_option(CF_DEPLOY_SETTINGS, array()));
+		$this->options['local_server'] = trailingslashit(get_bloginfo('wpurl'));
+			
 	}
 
 	function add_actions() {
@@ -189,12 +195,16 @@ class RAMP_Meta_Mappings {
 		// This runs after the two actions above, comparison data is stored in $this->post_types_compare
 		// Adds additional posts to the batch based on meta data
 		add_action('ramp_pre_get_deploy_data', array($this, 'pre_get_deploy_data'));
-
+		
+		add_filter('ramp_url_translation', array($this, 'url_translation'));
+		
 		// Modifies the object that the client gets locally to compare with the server post
 		add_filter('ramp_get_comparison_data_post', array($this, 'get_comparison_data_post'));
+		add_filter('ramp_process_comparison_data', array($this, 'process_meta_data'), 10, 2);
 
 		// Modified the meta just before sending it to the server
 		add_filter('ramp_get_deploy_object', array($this, 'get_deploy_object'), 10, 2);
+		add_filter('ramp_process_deploy_object', array($this, 'process_meta_data'), 10, 2);
 
 		// Extras handling
 		add_action('ramp_extras_preflight_name', array($this, 'extras_preflight_name'), 10, 2);
@@ -215,16 +225,99 @@ class RAMP_Meta_Mappings {
 
 		// Modifies server return data. Updates post meta to be guids of posts on the server
 		add_filter('ramp_compare', array($this, 'compare'));
-
+		add_filter('ramp_process_compare', array($this, 'process_meta_data'));
+		
 		// Adds additional messages to the preflight display
 		add_filter('ramp_preflight_post', array($this, 'preflight_post'), 10, 3);
 
 		// Handles the remapping
 		add_action('ramp_do_batch_extra_receive', array($this, 'do_batch_extra_receive'), 10, 3);
+		add_filter('ramp_process_batch', array($this, 'process_reverse_meta_data'), 10, 2);
 
 	}
 
 // Client functions
+	
+	function contains_url($value) {
+		if( strpos($value, $this->options['local_server']) !== false ) return true;
+		return false;
+	}
+	
+	function url_translation($value) {
+		 // Convert the local server URL to the remote server URL			
+		$replacement_value = str_replace($this->options['local_server'], $this->options['remote_server'][0]['address'], $value);
+		
+		return $replacement_value;				
+	}
+	
+	/**
+	 * Runs on Client
+	 * Get the local guid, for arrays and single values
+	 * 
+	 **/
+	function process_meta_data($meta_key, $meta_value = null) {
+					
+		if (is_array($meta_value)) {
+			$converted_value = $meta_value;
+			$guid_keys = array(
+				'converted_keys' => array()
+			);
+									
+			foreach($meta_value as $key => $value) {	
+				
+				if(is_int($value) || is_string($value) ) {
+					
+					if( $this->contains_url($value) ) { 
+												
+						$converted_value[$key] = apply_filters('ramp_url_translation', $value);						
+					
+					} else {
+						
+						$guid = cfd_get_post_guid((int) $value);
+						if ($guid) {
+							$converted_value[$key] = $guid;
+							$converted_value['converted_keys'][] = $key; // Save the keys that were converted so they can be used on the server side to only convert these back
+						}
+						
+					}
+					
+				}
+			}
+						
+			if( !empty($converted_value) ) {
+				return $converted_value;
+			}
+			
+		} else {
+			
+			
+			if( is_int($meta_value) || is_string($meta_value) ) {
+				
+				if( $this->contains_url($meta_value) ) { 
+					
+					$updated_value = apply_filters('ramp_url_translation', $meta_value);		
+												
+					return $updated_value; 						
+				
+				} else {
+							
+					$guid = cfd_get_post_guid((int) $meta_value);
+					if ($guid) {
+						return $guid;
+					}
+					
+					return $meta_value;
+					
+				}
+				
+			} else return $meta_value;
+			
+		}
+				
+		return $meta_value;
+		
+	}
+
 	/**
 	 * Runs on Client
 	 * Fetch comparison data on preflight and save in the meta
@@ -249,7 +342,6 @@ class RAMP_Meta_Mappings {
 		foreach ($data as $post_type => $posts) {
 			$post_guids = array_merge($post_guids, array_keys($posts));
 		}
-
 		update_post_meta($batch_id, $this->comparison_key, $post_guids);
 	}
 
@@ -286,28 +378,18 @@ class RAMP_Meta_Mappings {
 	 * Replaces the post's meta mapped keys with the guids
 	 **/
 	function get_comparison_data_post($post) {
+				
 		$post_meta_keys = $post->profile['meta'];
+				
 		if (is_array($post_meta_keys)) {
+				
 			foreach ($post_meta_keys as $meta_key => $meta_value) {
-				if (in_array($meta_key, $this->meta_keys_to_map)) {
-					if (is_array($meta_value)) { // Check if we are dealing with an Array, if so, all of the values need to be converted
-						$guid_array = array();
-						foreach($meta_value as $value) {
-							$guid = cfd_get_post_guid($value);
-							if($guid) {
-								$guid_array[] = $guid;
-							}
- 						}
- 						$post->profile['meta'][$meta_key] = $guid_array;
-					} else {					
-						$guid = cfd_get_post_guid($meta_value);
-						if ($guid) {
-							$post->profile['meta'][$meta_key] = $guid;
-						}
-					}
+				if (in_array($meta_key, $this->meta_keys_to_map)) {																
+					$post->profile['meta'][$meta_key] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value);										
 				}
 			}
 		}
+		
 		return $post;
 	}
 
@@ -317,27 +399,17 @@ class RAMP_Meta_Mappings {
 	 * This occurs just before sending data to the server
 	 **/
 	function get_deploy_object($object, $object_type) {
+				
 		if ($object_type == 'post_types') {
 			if (isset($object['meta']) && is_array($object['meta'])) {
 				foreach ($object['meta'] as $meta_key => $meta_value) {
-					if (is_array($meta_value)) { // Check if we are dealing with an Array, if so, all the values need to be converted
-						$guid_array = array();
-						foreach($meta_value as $value) {
-							$guid = cfd_get_post_guid($value);
-							if($guid) {
-								$guid_array[] = $guid;
-							}
- 						}
- 						$object['meta'][$meta_key] = $guid_array;
-					} else if (is_numeric($meta_value)) {
-						$guid = cfd_get_post_guid($meta_value);
-						if ($guid) {
-							$object['meta'][$meta_key] = $guid;
-						}
-					}
+					if (in_array($meta_key, $this->meta_keys_to_map)) {					
+						$object['meta'][$meta_key] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value);
+					}										
 				}
 			}
 		}
+						
 		return $object;
 	}
 
@@ -364,6 +436,7 @@ class RAMP_Meta_Mappings {
 									'post_type' => $new_post->post_type,
 									'guid' => $new_post->guid
 								);
+								
 			$this->batch_posts[] = $new_post->guid;
 			$this->process_post($new_post->ID, false);
 		}
@@ -386,11 +459,14 @@ class RAMP_Meta_Mappings {
 				// $meta_values should always be an array
 				if (is_array($meta_values)) {
 					foreach ($meta_values as $meta_value) {
+						
 						if (in_array($meta_key, $this->meta_keys_to_map)) {
 							if (is_array($meta_value)) { // Add in the ability for arrays of keys to be processed
 								foreach($meta_value as $value) {
-									$new_post = get_post($meta_value);
-									$this->process_post_add($new_post);
+									if( is_int($value) || is_string($value) ) {
+										$new_post = get_post((int) $meta_value);
+										$this->process_post_add($new_post);
+									}
 								}
 							} else if ((int)$meta_value > 0) {
 								// Check existance
@@ -402,6 +478,7 @@ class RAMP_Meta_Mappings {
 				}
 			}
 		}
+		
 	}
 
 	// Helper for displaying the meta keys
@@ -422,6 +499,7 @@ class RAMP_Meta_Mappings {
 		else {
 			$meta_keys = $this->meta_keys_to_map;
 		}
+				
 		$extras[$this->extras_id] = array(
 			'meta_keys' => $meta_keys, // The keys we're mapping (or were mapped)
 			'mapped_posts' => $this->added_posts, // All posts which have been added to the batch by this plugin
@@ -430,6 +508,7 @@ class RAMP_Meta_Mappings {
 			'description' => sprintf(__('Key mappings: %s', 'ramp-mm'), $this->meta_to_markup($meta_keys)),
 			'__message__' => sprintf(__('Keys to be remapped: %s', 'ramp-mm'), $this->meta_to_markup($meta_keys)),
 		);
+				
 		return $extras;
 	}
 
@@ -448,7 +527,7 @@ class RAMP_Meta_Mappings {
 	function do_batch_extra_send($extra, $id) {
 		if ($id == $this->extras_id) {
 			$extras = $this->get_extras(array(), 'default');
-			$extra = $extras[$this->extras_id];
+			$extra = $extras[$this->extras_id];						
 		}
 		return $extra;
 	}
@@ -476,6 +555,7 @@ class RAMP_Meta_Mappings {
 				}
 			}
 		}
+				
 		// So the server knows which ones are added, also for display
 		if (isset($this->data['extras'])) {
 			$this->data['extras'] = $this->get_extras($this->data['extras']);
@@ -496,16 +576,18 @@ class RAMP_Meta_Mappings {
 	function close_batch_send($args) {
 		$batch_id = $args['batch_id'];
 		$batch = new cfd_batch(array('ID' => intval($batch_id)));
-
+		
 		// Save this data for the history view without modifying RAMP data
 		$this->pre_get_deploy_data($batch);
 		$history_data = array(
 			'meta_keys' => $this->meta_keys_to_map,
 			'posts' => $this->added_posts,
 		);
+		
 		update_post_meta($batch_id, $this->history_key, $history_data);
 		// Cleanup
 		$this->delete_comparison_data($batch_id);
+		
 	}
 
 	/**
@@ -552,22 +634,9 @@ class RAMP_Meta_Mappings {
 					if ( is_array( $post_meta ) ) {
 						foreach ( $post_meta as $meta_key => $meta_value ) {
 							if ( in_array( $meta_key, $meta_keys_to_map )) {
-								if( is_array($meta_value) ) { // We have an array with potential posts, convert all of them
-									$guid_array = array();
-									foreach($meta_value as $value) {
-										$guid = cfd_get_post_guid( $value );
-										if ( $guid ) {
-											$guid_array[] = $guid;
-										}
-									}
-									$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = $guid_array;
-								} else if( is_numeric( $meta_value ) ) {
-									// Get guid and set it as that!
-									$guid = cfd_get_post_guid( $meta_value );
-									if ( $guid ) {
-										$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = $guid;
-									}
-								}
+								
+								$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = apply_filters('ramp_process_comparison_data', $meta_value);
+								
 							}
 						}
 					}
@@ -625,7 +694,7 @@ class RAMP_Meta_Mappings {
 
 		return $ret;
 	}
-
+	
 	/**
 	 * Runs on server
 	 * Recieves a list of guids that have been mapped locally
@@ -635,43 +704,71 @@ class RAMP_Meta_Mappings {
 	 **/
 	function do_batch_extra_receive($extra_data, $extra_id, $batch_args) {
 		if ($extra_id == $this->extras_id) {
-
-			$batch_guids = (array) array_unique($batch_args['batch_posts']);
+			
+			$batch_posts = (array) array_unique($batch_args['batch_posts']);
 			$mapped_keys = $batch_args['meta_keys'];
-
+			
 			// Loop through list of guids sent in the batch
-			foreach ($batch_guids as $guid) {
-				$server_post = cfd_get_post_by_guid($guid);
+			foreach ($batch_posts as $post_guid) {
+				$server_post = cfd_get_post_by_guid($post_guid);
+								
 				if ($server_post) {
 					$meta = get_metadata('post', $server_post->ID);
+					
 					if (is_array($meta)) {
 						// Loop through server post meta checking meta keys that should be mapped
 						foreach ($meta as $meta_key => $meta_values) {
 							foreach ($meta_values as $meta_value) {
+								
 								if (in_array($meta_key, $mapped_keys) && !is_numeric($meta_value)) {
 									
-									if (is_serialized($meta_value)) { // We have an array with some post GUIDs, convert them all over to IDs
-										$posts_array = unserialize($meta_value);
-										$server_posts = array();
-										foreach($posts_array as $value) {
-											$mapped_server_post = cfd_get_post_by_guid($value);
-											if ($mapped_server_post) {
-												$server_posts[] = (string) $mapped_server_post->ID;
-											}
-										}
-										update_post_meta($server_post->ID, $meta_key, $server_posts, $posts_array);
-									} else {
-										$mapped_server_post = cfd_get_post_by_guid($meta_value);
-										if ($mapped_server_post) {
-											update_post_meta($server_post->ID, $meta_key, $mapped_server_post->ID, $meta_value);
-										}
+									$mapped_meta_value = apply_filters('ramp_process_batch', $meta_key, $meta_value);
+									if ($mapped_meta_value) {
+										update_post_meta($server_post->ID, $meta_key, $mapped_meta_value);
 									}
+									
 								}
 							}
 						}
 					}
 				}
 			}
+						
 		}
 	}
+	
+	function process_reverse_meta_data($meta_key, $meta_value) { 
+				
+		if (is_serialized($meta_value)) { // We have an array with some post GUIDs, convert them all over to IDs
+			
+			$posts_array = unserialize($meta_value);
+			
+			// The keys that were converted on the client site
+			$converted_keys = $posts_array['converted_keys'];
+			unset($posts_array['converted_keys']); // Remove converted keys, don't need to store them
+			
+			foreach($posts_array as $key => $value) {
+				
+				if( !in_array($key, $converted_keys) ) continue;
+								
+				$mapped_server_post = cfd_get_post_by_guid($value);
+				 				
+				if ($mapped_server_post) {
+					$posts_array[$key] = (string)$mapped_server_post->ID;
+				}
+			}	
+			
+			return $posts_array;
+			
+		} else {
+			$mapped_server_post = cfd_get_post_by_guid($meta_value);
+			
+			if( $mapped_server_post ) return $mapped_server_post->ID;
+						
+			return false;
+		}
+
+		return false;
+	}
+	
 }

@@ -1,5 +1,9 @@
 # ramp-postid-meta-translation
 
+## 1.3.0
+
+- Major improvements to how serialized data is checked. Also coverts URLs stored in the serialized data.
+
 ## 1.2.0
 
 - Added the ability to check serialized meta values for post IDs
