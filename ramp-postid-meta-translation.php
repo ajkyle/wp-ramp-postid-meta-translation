@@ -3,7 +3,7 @@
 Plugin Name: RAMP Post ID Meta Translation
 Plugin URI: http://crowdfavorite.com
 Description: Adds the ability to select which post meta fields represent a post mapping and adds them to the batch | Modified by ajkyle (https://github.com/ajkyle) to allow for support of serialized meta values that contain post IDs. Advanced Custom Fields uses this for a lot of their relationship fields.
-Version: 1.3.0
+Version: 1.3.1
 Author: Crowd Favorite
 Author URI: http://crowdfavorite.com
 */
@@ -184,6 +184,21 @@ class RAMP_Meta_Mappings {
 		
 		$this->options = maybe_unserialize(get_option(CF_DEPLOY_SETTINGS, array()));
 		$this->options['local_server'] = trailingslashit(get_bloginfo('wpurl'));
+		
+				
+		$upload_dir = wp_upload_dir();
+		$this->log_file = fopen($upload_dir['basedir'].'/ramp_results.html', 'a');
+		
+		/*
+		ob_start();
+		
+		echo 'Hello';	
+		
+		$content = ob_get_contents();
+		ob_end_clean();
+		
+		fwrite($this->log_file, $content);
+		*/
 			
 	}
 
@@ -200,11 +215,11 @@ class RAMP_Meta_Mappings {
 		
 		// Modifies the object that the client gets locally to compare with the server post
 		add_filter('ramp_get_comparison_data_post', array($this, 'get_comparison_data_post'));
-		add_filter('ramp_process_comparison_data', array($this, 'process_meta_data'), 10, 2);
+		add_filter('ramp_process_comparison_data', array($this, 'process_meta_data'), 10, 3);
 
 		// Modified the meta just before sending it to the server
 		add_filter('ramp_get_deploy_object', array($this, 'get_deploy_object'), 10, 2);
-		add_filter('ramp_process_deploy_object', array($this, 'process_meta_data'), 10, 2);
+		add_filter('ramp_process_deploy_object', array($this, 'process_meta_data'), 10, 3);
 
 		// Extras handling
 		add_action('ramp_extras_preflight_name', array($this, 'extras_preflight_name'), 10, 2);
@@ -255,7 +270,7 @@ class RAMP_Meta_Mappings {
 	 * Get the local guid, for arrays and single values
 	 * 
 	 **/
-	function process_meta_data($meta_key, $meta_value = null) {
+	function process_meta_data($meta_key, $meta_value = null, $url_translation = false) {
 					
 		if (is_array($meta_value)) {
 			$converted_value = $meta_value;
@@ -269,7 +284,8 @@ class RAMP_Meta_Mappings {
 					
 					if( $this->contains_url($value) ) { 
 												
-						$converted_value[$key] = apply_filters('ramp_url_translation', $value);						
+						if( $url_translation ) $converted_value[$key] = apply_filters('ramp_url_translation', $value);						
+						else $converted_value[$key] = $value;
 					
 					} else {
 						
@@ -295,7 +311,8 @@ class RAMP_Meta_Mappings {
 				
 				if( $this->contains_url($meta_value) ) { 
 					
-					$updated_value = apply_filters('ramp_url_translation', $meta_value);		
+					if( $url_translation ) $updated_value = apply_filters('ramp_url_translation', $meta_value);		
+					else $updated_value = $meta_value;
 												
 					return $updated_value; 						
 				
@@ -330,7 +347,7 @@ class RAMP_Meta_Mappings {
 
 		// Now the batch has populated c_data
 		$data = $admin_deploy->batch->get_comparison_data('post_types');
-
+				
 		$this->save_comparison_data($admin_deploy->batch->ID, $data);
 	}
 
@@ -384,8 +401,9 @@ class RAMP_Meta_Mappings {
 		if (is_array($post_meta_keys)) {
 				
 			foreach ($post_meta_keys as $meta_key => $meta_value) {
-				if (in_array($meta_key, $this->meta_keys_to_map)) {																
-					$post->profile['meta'][$meta_key] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value);										
+				if (in_array($meta_key, $this->meta_keys_to_map)) {		
+																			
+					$post->profile['meta'][$meta_key] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value, false);										
 				}
 			}
 		}
@@ -404,7 +422,7 @@ class RAMP_Meta_Mappings {
 			if (isset($object['meta']) && is_array($object['meta'])) {
 				foreach ($object['meta'] as $meta_key => $meta_value) {
 					if (in_array($meta_key, $this->meta_keys_to_map)) {					
-						$object['meta'][$meta_key] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value);
+						$object['meta'][$meta_key] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value, true);
 					}										
 				}
 			}
