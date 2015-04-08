@@ -643,10 +643,7 @@ class RAMP_Meta_Mappings {
 	 * Occurs before sending post difference back to the client
 	 **/
 	function compare($c_data) {
-		
-		ob_start();
 				
-		
 		$meta_keys_to_map = $c_data['extras'][ $this->extras_id ]['meta_keys']['status'];
 		foreach ( $c_data['post_types'] as $post_type => $posts ) {
 			foreach ( $posts as $post_guid => $post_data ) {
