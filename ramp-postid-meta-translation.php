@@ -3,7 +3,7 @@
 Plugin Name: RAMP Post ID Meta Translation
 Plugin URI: http://crowdfavorite.com
 Description: Adds the ability to select which post meta fields represent a post mapping and adds them to the batch | Modified by ajkyle (https://github.com/ajkyle) to allow for support of serialized meta values that contain post IDs. Advanced Custom Fields uses this for a lot of their relationship fields.
-Version: 1.3.1
+Version: 1.3.2
 Author: Crowd Favorite
 Author URI: http://crowdfavorite.com
 */
@@ -185,11 +185,10 @@ class RAMP_Meta_Mappings {
 		$this->options = maybe_unserialize(get_option(CF_DEPLOY_SETTINGS, array()));
 		$this->options['local_server'] = trailingslashit(get_bloginfo('wpurl'));
 		
-				
+		/*		
 		$upload_dir = wp_upload_dir();
 		$this->log_file = fopen($upload_dir['basedir'].'/ramp_results.html', 'a');
-		
-		/*
+				
 		ob_start();
 		
 		echo 'Hello';	
@@ -273,13 +272,14 @@ class RAMP_Meta_Mappings {
 	function process_meta_data($meta_key, $meta_value = null, $url_translation = false) {
 					
 		if (is_array($meta_value)) {
+						
 			$converted_value = $meta_value;
 			$guid_keys = array(
 				'converted_keys' => array()
 			);
 									
 			foreach($meta_value as $key => $value) {	
-				
+							
 				if(is_int($value) || is_string($value) ) {
 					
 					if( $this->contains_url($value) ) { 
@@ -306,9 +306,8 @@ class RAMP_Meta_Mappings {
 			
 		} else {
 			
-			
 			if( is_int($meta_value) || is_string($meta_value) ) {
-				
+					
 				if( $this->contains_url($meta_value) ) { 
 					
 					if( $url_translation ) $updated_value = apply_filters('ramp_url_translation', $meta_value);		
@@ -330,6 +329,7 @@ class RAMP_Meta_Mappings {
 			} else return $meta_value;
 			
 		}
+		
 				
 		return $meta_value;
 		
@@ -344,7 +344,7 @@ class RAMP_Meta_Mappings {
 		$admin_deploy->batch->init_comparison_data();
 		$admin_deploy->batch->add_extras_comparison_data($admin_deploy->get_comparison_extras());
 		$admin_deploy->do_server_comparison($admin_deploy->batch);
-
+				
 		// Now the batch has populated c_data
 		$data = $admin_deploy->batch->get_comparison_data('post_types');
 				
@@ -395,7 +395,7 @@ class RAMP_Meta_Mappings {
 	 * Replaces the post's meta mapped keys with the guids
 	 **/
 	function get_comparison_data_post($post) {
-				
+						
 		$post_meta_keys = $post->profile['meta'];
 				
 		if (is_array($post_meta_keys)) {
@@ -643,6 +643,10 @@ class RAMP_Meta_Mappings {
 	 * Occurs before sending post difference back to the client
 	 **/
 	function compare($c_data) {
+		
+		ob_start();
+				
+		
 		$meta_keys_to_map = $c_data['extras'][ $this->extras_id ]['meta_keys']['status'];
 		foreach ( $c_data['post_types'] as $post_type => $posts ) {
 			foreach ( $posts as $post_guid => $post_data ) {
@@ -652,15 +656,16 @@ class RAMP_Meta_Mappings {
 					if ( is_array( $post_meta ) ) {
 						foreach ( $post_meta as $meta_key => $meta_value ) {
 							if ( in_array( $meta_key, $meta_keys_to_map )) {
-								
-								$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = apply_filters('ramp_process_comparison_data', $meta_value);
-								
+									
+								$c_data['post_types'][ $post_type ][ $post_guid ]['profile']['meta'][ $meta_key ] = apply_filters('ramp_process_comparison_data', $meta_key, $meta_value);
+																
 							}
 						}
 					}
 				}
 			}
 		}
+				
 		// This gets returned to the client
 		return $c_data;
 	}
