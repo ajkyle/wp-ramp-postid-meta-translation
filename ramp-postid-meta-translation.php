@@ -28,7 +28,7 @@ function ramp_mm_keys() {
 function ramp_mm_init() {
 	register_setting('cf-deploy-settings', 'ramp_mm_keys', 'ramp_mm_validate');
 	foreach (ramp_mm_keys() as $key) {
-		cfr_register_metadata($key);
+		if( function_exists('cfr_register_metadata') ) cfr_register_metadata($key);
 	}
 }
 add_action('admin_init', 'ramp_mm_init');
@@ -259,7 +259,7 @@ class RAMP_Meta_Mappings {
 	
 	function url_translation($value) {
 		 // Convert the local server URL to the remote server URL			
-		$replacement_value = str_replace($this->options['local_server'], $this->options['remote_server'][0]['address'], $value);
+		$replacement_value = str_replace($this->options['local_server'], trailingslashit($this->options['remote_server'][0]['address']), $value);
 		
 		return $replacement_value;				
 	}

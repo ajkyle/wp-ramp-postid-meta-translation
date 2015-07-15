@@ -1,5 +1,9 @@
 # ramp-postid-meta-translation
 
+## 1.3.3
+
+- Corrected URL replacement, remote and local addresses but use trailing / on replacement.
+
 ## 1.3.2
 
 - Corrected the comparison of meta data to what needs to be RAMPed
