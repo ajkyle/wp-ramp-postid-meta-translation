@@ -1,5 +1,9 @@
 # ramp-postid-meta-translation
 
+## 1.3.4
+
+- Local address forced to use trailing / on url replacement
+
 ## 1.3.3
 
 - Corrected URL replacement, remote and local addresses but use trailing / on replacement.

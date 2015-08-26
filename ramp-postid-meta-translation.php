@@ -259,7 +259,7 @@ class RAMP_Meta_Mappings {
 	
 	function url_translation($value) {
 		 // Convert the local server URL to the remote server URL			
-		$replacement_value = str_replace($this->options['local_server'], trailingslashit($this->options['remote_server'][0]['address']), $value);
+		$replacement_value = str_replace(trailingslashit($this->options['local_server']), trailingslashit($this->options['remote_server'][0]['address']), $value);
 		
 		return $replacement_value;				
 	}
